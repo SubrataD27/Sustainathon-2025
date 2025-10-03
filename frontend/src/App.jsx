@@ -23,11 +23,17 @@ function App() {
   const [showHelp, setShowHelp] = useState(false);
   const [whitelist, setWhitelist] = useState([]);
   const [risk, setRisk] = useState(null);
+  const [cameraFeed, setCameraFeed] = useState(null);
+  const [aiDetections, setAiDetections] = useState([]);
+  const [yoloStatus, setYoloStatus] = useState('offline');
+  const [useWebcam, setUseWebcam] = useState(false);
+  const [webcamAvailable, setWebcamAvailable] = useState(false);
   const mapRef = useRef(null);
   const mapInstance = useRef(null);
   const threatMarkers = useRef({});
   const audioRef = useRef(null);
   const alertedThreats = useRef(new Set());
+  const videoRef = useRef(null);
 
   const fetchThreats = useCallback(async () => {
     try {
@@ -64,6 +70,48 @@ function App() {
     try { const r = await axios.get(`${API}/airspace/whitelist`); setWhitelist(r.data);} catch(e){console.error(e);} }, []);
   const fetchRisk = useCallback(async () => {
     try { const r = await axios.get(`${API}/risk/score`); setRisk(r.data);} catch(e){console.error(e);} }, []);
+
+  const fetchAiDetections = useCallback(async () => {
+    try { 
+      const r = await axios.get(`${API}/ai/detections`); 
+      setAiDetections(r.data.detections || []);
+      // backend returns { status: 'success', model_status: 'active' }
+      setYoloStatus(r.data.model_status || r.data.status || 'offline');
+    } catch(e){
+      console.error(e);
+      setYoloStatus('offline');
+    } 
+  }, []);
+
+  const captureCanvasRef = useRef(null);
+  const webcamVideoRef = useRef(null);
+
+  const processCameraFrame = useCallback(async () => {
+    if (useWebcam && webcamVideoRef.current && captureCanvasRef.current) {
+      try {
+        const video = webcamVideoRef.current;
+        if (!video.videoWidth) return; // not ready yet
+        const canvas = captureCanvasRef.current;
+        const ctx = canvas.getContext('2d');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+        const resp = await axios.post(`${API}/ai/frame`, { image_base64: dataUrl, client_timestamp: Date.now() });
+        if (resp.data.detections?.length) {
+          setAiDetections(prev => [...prev.slice(-40), ...resp.data.detections]);
+          setYoloStatus(resp.data.inference?.yolo_status || 'active');
+        }
+      } catch(err){ console.error('webcam frame error', err); }
+      return;
+    }
+    // fallback simulated
+    try {
+      const r = await axios.post(`${API}/ai/process`, { camera_url: 'http://192.168.137.189/mjpeg/1', timestamp: Date.now() });
+      if (r.data.detections) setAiDetections(prev => [...prev.slice(-40), ...r.data.detections]);
+      setYoloStatus(r.data.model_info?.status || 'active');
+    } catch(e){ console.error(e); }
+  }, [useWebcam]);
 
   const seedScenario = async () => {
     try { await axios.post(`${API}/threats/seed`, { count: 8 }); fetchThreats(); } catch(e){console.error(e);} };
@@ -150,11 +198,49 @@ function App() {
   }
   };
 
+  // Core polling + AI frame loop
   useEffect(() => {
-    fetchThreats(); fetchLedger(); fetchIncidents(); fetchCommands(); fetchIntegrity(); fetchSummary(); fetchMode(); fetchRos(); fetchDrone(); fetchWhitelist(); fetchRisk(); initMap();
-    const i = setInterval(() => { fetchThreats(); fetchLedger(); fetchIncidents(); fetchCommands(); fetchIntegrity(); fetchSummary(); fetchMode(); fetchRos(); fetchDrone(); fetchWhitelist(); fetchRisk(); }, 6000);
-    return () => clearInterval(i);
-  }, [fetchThreats, fetchLedger, fetchIncidents, fetchCommands, fetchIntegrity, fetchSummary, fetchMode, fetchRos, fetchDrone, fetchWhitelist, fetchRisk]);
+    fetchThreats(); fetchLedger(); fetchIncidents(); fetchCommands(); fetchIntegrity(); fetchSummary(); fetchMode(); fetchRos(); fetchDrone(); fetchWhitelist(); fetchRisk(); fetchAiDetections(); initMap();
+    const mainInterval = setInterval(() => { fetchThreats(); fetchLedger(); fetchIncidents(); fetchCommands(); fetchIntegrity(); fetchSummary(); fetchMode(); fetchRos(); fetchDrone(); fetchWhitelist(); fetchRisk(); fetchAiDetections(); }, 6000);
+    // Faster AI frame cadence for smoother demo (1s)
+    const aiInterval = setInterval(processCameraFrame, 1000);
+    return () => { clearInterval(mainInterval); clearInterval(aiInterval); };
+  }, [fetchThreats, fetchLedger, fetchIncidents, fetchCommands, fetchIntegrity, fetchSummary, fetchMode, fetchRos, fetchDrone, fetchWhitelist, fetchRisk, fetchAiDetections, processCameraFrame]);
+
+  // Webcam initialization & teardown
+  useEffect(() => {
+    let activeStream;
+    if (useWebcam) {
+      if (navigator.mediaDevices?.getUserMedia) {
+        navigator.mediaDevices.getUserMedia({ video: { width: 960, height: 540 }, audio: false })
+          .then(stream => {
+            activeStream = stream;
+            if (webcamVideoRef.current) {
+              webcamVideoRef.current.srcObject = stream;
+            }
+            setWebcamAvailable(true);
+          })
+          .catch(err => {
+            console.error('Webcam access denied', err);
+            setWebcamAvailable(false);
+          });
+      } else {
+        setWebcamAvailable(false);
+      }
+    } else {
+      // Stop any existing tracks when disabling
+      if (webcamVideoRef.current && webcamVideoRef.current.srcObject) {
+        try { (webcamVideoRef.current.srcObject.getTracks()||[]).forEach(t=>t.stop()); } catch(_){}
+        webcamVideoRef.current.srcObject = null;
+      }
+      setWebcamAvailable(false);
+    }
+    return () => {
+      if (activeStream) {
+        activeStream.getTracks().forEach(t => t.stop());
+      }
+    };
+  }, [useWebcam]);
 
   const dispatchCommand = async (type='return_to_base') => {
     try { await axios.post(`${API}/commands/dispatch`, { command:type }); fetchCommands(); fetchLedger(); fetchIncidents(); } catch(e){console.error(e);} };
@@ -177,7 +263,7 @@ function App() {
       </header>
       <main className="grid">
         <section className="panel wide">
-          <h2>🗺️ Spatial Awareness <span className="live-indicator">TRACKING</span></h2>
+          <h2>�️ Spatial Awareness <span className="live-indicator">TRACKING</span></h2>
           <div ref={mapRef} className="map" />
           <h2 style={{marginTop:16}}>📈 Threat Analytics (15m Window) <span className="live-indicator">TREND</span></h2>
           <div style={{height:180}}>
@@ -192,6 +278,159 @@ function App() {
               </LineChart>
             </ResponsiveContainer>
           </div>
+        </section>
+        <section className="panel wide">
+          <h2> Live Camera Feed & AI Detection <span className="live-indicator">YOLO-V8</span></h2>
+          <div style={{display:'flex', gap:12, marginBottom:12}}>
+            <button style={{fontSize:12}} onClick={()=>setUseWebcam(s=>!s)}>
+              {useWebcam ? 'Disable Laptop Camera' : 'Use Laptop Camera'}
+            </button>
+            {useWebcam && <span style={{fontSize:11, opacity:.6}}>{webcamAvailable? '🎥 Webcam Active' : '⏳ Awaiting Permission'}</span>}
+          </div>
+          <div style={{display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '16px', marginBottom: '16px'}}>
+            <div className="camera-container">
+              <div style={{position: 'relative', background: '#0a0f1a', borderRadius: '12px', overflow: 'hidden', height: '300px'}}>
+                {useWebcam ? (
+                  <video
+                    ref={webcamVideoRef}
+                    muted
+                    playsInline
+                    autoPlay
+                    style={{width:'100%',height:'100%',objectFit:'cover',borderRadius:'12px',background:'#000'}}
+                  />
+                ) : (
+                  <img
+                    ref={videoRef}
+                    src="http://192.168.137.189/mjpeg/1"
+                    alt="ESP32 Camera Feed"
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '12px' }}
+                    onError={(e) => {
+                      setCameraFeed(false);
+                      e.target.style.display = 'none';
+                      if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex';
+                    }}
+                    onLoad={(e) => {
+                      setCameraFeed(true);
+                      e.target.style.display = 'block';
+                      if (e.target.nextSibling) e.target.nextSibling.style.display = 'none';
+                    }}
+                  />
+                )}
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  height: '100%',
+                  color: '#666',
+                  fontSize: '14px',
+                  flexDirection: 'column',
+                  gap: '8px'
+                }}>
+                  <div>📷 Camera Offline</div>
+                  <div style={{fontSize: '12px', opacity: 0.7}}>{useWebcam ? 'Laptop Camera' : 'ESP32: 192.168.137.189'}</div>
+                </div>
+                {/* Bounding Box Overlays */}
+                {aiDetections.slice(-12).map(det => {
+                  const bb = det.bbox || {};
+                  const left = (bb.x ?? det.x ?? 0);
+                  const top = (bb.y ?? det.y ?? 0);
+                  const width = bb.width ?? 0;
+                  const height = bb.height ?? 0;
+                  const isThreat = det.class === 'drone';
+                  return (
+                    <div key={det.id} style={{
+                      position: 'absolute',
+                      left: `${left}%`,
+                      top: `${top}%`,
+                      width: width? `${width}%` : 'auto',
+                      height: height? `${height}%` : 'auto',
+                      border: `2px solid ${isThreat ? 'rgba(255,0,0,0.9)' : 'rgba(0,200,255,0.8)'}`,
+                      borderRadius: 4,
+                      boxShadow: '0 0 6px rgba(0,0,0,0.6)',
+                      pointerEvents: 'none',
+                      backdropFilter: 'contrast(1.1)'
+                    }}>
+                      <div style={{
+                        position: 'absolute',
+                        top: '-18px',
+                        left: 0,
+                        background: isThreat ? 'rgba(255,0,0,0.9)' : 'rgba(0,160,255,0.85)',
+                        color: '#fff',
+                        fontSize: 10,
+                        fontWeight: 600,
+                        padding: '2px 4px',
+                        borderRadius: 3,
+                        whiteSpace: 'nowrap'
+                      }}>
+                        {det.class?.toUpperCase() || 'OBJECT'} {Math.round((det.confidence||0)*100)}%
+                      </div>
+                    </div>
+                  );
+                })}
+                {/* Status Overlay */}
+                <div style={{
+                  position: 'absolute',
+                  top: '12px',
+                  right: '12px',
+                  background: yoloStatus === 'active' ? 'rgba(0, 255, 0, 0.8)' : 'rgba(255, 0, 0, 0.8)',
+                  color: 'white',
+                  padding: '4px 8px',
+                  borderRadius: '12px',
+                  fontSize: '10px',
+                  fontWeight: '600',
+                  textTransform: 'uppercase',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}>
+                  <div style={{width: '6px', height: '6px', borderRadius: '50%', background: 'currentColor'}} />
+                  YOLO {yoloStatus}
+                </div>
+              </div>
+            </div>
+            <div className="ai-panel">
+              <h3 style={{margin: '0 0 12px', fontSize: '14px', color: '#4fc3f7'}}>🤖 AI Detection Log</h3>
+              <div className="list scroll" style={{maxHeight: '240px'}}>
+                {aiDetections.slice(-8).reverse().map((detection, idx) => (
+                  <div key={idx} className="item detection">
+                    <div>
+                      <strong>{detection.class === 'drone' ? '🚁' : detection.class === 'bird' ? '🐦' : '📦'} {(detection.class || 'OBJECT').toUpperCase()}</strong>
+                      <small>Confidence: {Math.round((detection.confidence || 0.85) * 100)}% | {new Date(detection.timestamp || Date.now()).toLocaleTimeString()}</small>
+                    </div>
+                    <span className={`confidence ${detection.class === 'drone' ? 'threat' : 'normal'}`}>
+                      {detection.class === 'drone' ? 'THREAT' : 'SAFE'}
+                    </span>
+                  </div>
+                ))}
+                {!aiDetections.length && <div className="empty">🔍 No AI detections yet</div>}
+              </div>
+            </div>
+          </div>
+          <div style={{display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px'}}>
+            <div className="metric-card">
+              <span>Camera Status</span>
+              <strong style={{color: (useWebcam ? (webcamAvailable ? '#00ff88':'#ffa502') : (cameraFeed ? '#00ff88' : '#ff4757'))}}>
+                {useWebcam ? (webcamAvailable ? 'WEB ⬤' : 'INIT') : (cameraFeed ? 'ONLINE' : 'OFFLINE')}
+              </strong>
+            </div>
+            <div className="metric-card">
+              <span>YOLO Model</span>
+              <strong style={{color: yoloStatus === 'active' ? '#00ff88' : '#ffa502'}}>
+                {yoloStatus.toUpperCase()}
+              </strong>
+            </div>
+            <div className="metric-card">
+              <span>Detections</span>
+              <strong>{aiDetections.length}</strong>
+            </div>
+            <div className="metric-card">
+              <span>Threat Objects</span>
+              <strong style={{color: '#ff4757'}}>
+                {aiDetections.filter(d => d.class === 'drone').length}
+              </strong>
+            </div>
+          </div>
+          <canvas ref={captureCanvasRef} style={{display:'none'}} />
         </section>
         <section className="panel">
           <h2>🎯 Active Threats <span className="live-indicator">LIVE</span></h2>

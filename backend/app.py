@@ -10,6 +10,7 @@ from modules.incidents import incidents_bp
 from modules.ws import ws_bp
 from modules.ops import ops_bp
 from modules.airspace import airspace_bp
+from modules.ai import ai_bp
 from modules.commands import COMMAND_LOG, DRONE_STATE
 from modules.threats import THREATS
 from modules.ledger import LEDGER
@@ -26,6 +27,7 @@ app.register_blueprint(incidents_bp, url_prefix='/api/incidents')
 app.register_blueprint(ws_bp, url_prefix='/api')
 app.register_blueprint(ops_bp, url_prefix='/api')
 app.register_blueprint(airspace_bp, url_prefix='/api')
+app.register_blueprint(ai_bp)
 
 @app.route('/api/health')
 def health():

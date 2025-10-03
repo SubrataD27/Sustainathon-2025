@@ -94,3 +94,7 @@ def summary():
 @ledger_bp.route('/all', methods=['GET'])
 def all_entries():
     return jsonify(LEDGER)
+
+@ledger_bp.route('/', methods=['GET'])
+def get_ledger():
+    return jsonify(LEDGER)

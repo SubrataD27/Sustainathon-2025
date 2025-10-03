@@ -12,3 +12,5 @@ uvicorn==0.30.1
 websockets==12.0
 cryptography==42.0.8
 orjson==3.10.3
+ultralytics==8.2.36  # optional: enable with ENABLE_YOLO=1
+opencv-python==4.10.0.84  # optional: webcam / frame decoding
