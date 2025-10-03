@@ -1,5 +1,21 @@
-# Project Kavach | Team Tejas
+# KAVACH - Autonomous Drone Defense System | Team Tejas
 ## Proactive Airspace Defense Platform with Trust-First Architecture
+
+### Executive Summary
+
+KAVACH is a comprehensive, autonomous drone defense system designed to detect, classify, and safely neutralize unauthorized drones in critical airspace. The system employs a multi-layered approach combining advanced sensor fusion, AI/ML-powered threat classification, and autonomous interception capabilities.
+
+### Core Value Proposition
+
+**Multi-Modal Detection**: Advanced sensor fusion combining RF detection, Doppler radar, and optical sensors for 360-degree airspace monitoring with minimal false positives.
+
+**Autonomous Interception**: High-speed K-Interceptor drone with AI-guided terminal approach and safe net-capture system for physical containment.
+
+**Trust-First Security**: Every action, detection, and response is cryptographically logged in an immutable hash-chain ledger, ensuring complete audit trails and tamper-evident operations.
+
+**Human-Supervised Autonomy**: Advanced AI provides instant threat assessment while maintaining human oversight for critical decisions, balancing speed with accountability.
+
+**Adaptive Defense**: Dynamic risk scoring and operational mode adjustment based on threat landscape, environmental conditions, and energy optimization.
 
 ### 🚀 Quick Start
 
