@@ -1,0 +1,43 @@
+version: 1
+rf_profiles:
+  - class: consumer_quadcopter
+    center_freq_mhz: 2450
+    bandwidth_mhz: 20
+    snr_db_range: [8, 25]
+  - class: prosumer_quadcopter
+    center_freq_mhz: 2412
+    bandwidth_mhz: 18
+    snr_db_range: [5, 20]
+  - class: jammer_sweep
+    center_freq_mhz: 2450
+    bandwidth_mhz: 40
+    snr_db_range: [15, 35]
+acoustic_signatures:
+  - class: consumer_quadcopter
+    blade_rpm: [4500, 5200]
+    harmonic_peaks: [220, 440, 880]
+  - class: prosumer_quadcopter
+    blade_rpm: [5200, 6000]
+    harmonic_peaks: [250, 500, 1000]
+  - class: jammer_sweep
+    harmonic_peaks: []
+vision_targets:
+  - class: consumer_quadcopter
+    size_px: [40, 80]
+  - class: prosumer_quadcopter
+    size_px: [60, 110]
+  - class: bird
+    size_px: [30, 70]
+synthetic:
+  samples_per_class: 500
+  noise:
+    gaussian_sigma: 0.08
+    rf_dropout_prob: 0.05
+    acoustic_env_variants: 4
+  adversarial:
+    enabled: true
+    fgsm_epsilon: 0.02
+splits:
+  train: 0.7
+  val: 0.15
+  test: 0.15
